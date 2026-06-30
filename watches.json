@@ -1,0 +1,40 @@
+[
+  {
+    "ticker": "TTWO",
+    "type": "catalyst",
+    "catalyst": "GTA VI launch",
+    "date": "2026-11-19",
+    "certainty": "firm",
+    "prediction_market": "kalshi:gta-vi-release",
+    "tripwires": {
+      "delay_headline": true,
+      "predmkt_ontime_drop_pts": 8,
+      "iv_rank_spike": 80
+    }
+  },
+  {
+    "ticker": "RKLB",
+    "type": "catalyst",
+    "catalyst": "Neutron maiden flight",
+    "date": "2026-Q4",
+    "certainty": "soft",
+    "support_level": 93.0,
+    "tripwires": {
+      "slip_headline": true,
+      "break_support": 93.0,
+      "iv_rank_spike": 80
+    }
+  },
+  {
+    "ticker": "WBD",
+    "type": "event_driven",
+    "catalyst": "PSKY merger close",
+    "deal_price": 31.00,
+    "close_target": "2026-09-30",
+    "tripwires": {
+      "spread_widen_pct": 20,
+      "spread_converge_pct": 4,
+      "break_headline": true
+    }
+  }
+]

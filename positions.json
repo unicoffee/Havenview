@@ -1,0 +1,45 @@
+[
+  {
+    "ticker": "TTWO",
+    "structure": "LEAP_call",
+    "legs": [
+      { "right": "call", "strike": 170.0, "expiry": "2027-01-15", "qty": 2 }
+    ],
+    "net_debit": 4200.0,
+    "size_pct_reserve": 6.0,
+    "stop_underlying": 138.0,
+    "targets": [210.0, 240.0],
+    "catalyst_date": "2026-11-19",
+    "thesis_ref": "theses/ttwo_gta6.md",
+    "sleeve": "expensive_momentum"
+  },
+  {
+    "ticker": "RKLB",
+    "structure": "call_spread",
+    "legs": [
+      { "right": "call", "strike": 100.0, "expiry": "2027-01-15", "qty": 5 },
+      { "right": "call", "strike": 130.0, "expiry": "2027-01-15", "qty": -5 }
+    ],
+    "net_debit": 5500.0,
+    "size_pct_reserve": 5.0,
+    "stop_underlying": 93.0,
+    "targets": [120.0, 130.0],
+    "catalyst_date": "2026-12-15",
+    "thesis_ref": "theses/rklb_neutron.md",
+    "sleeve": "expensive_momentum"
+  },
+  {
+    "ticker": "WBD",
+    "structure": "shares",
+    "legs": [
+      { "right": "shares", "strike": null, "expiry": null, "qty": 1000 }
+    ],
+    "net_debit": 29500.0,
+    "size_pct_reserve": 8.0,
+    "stop_underlying": 26.5,
+    "targets": [31.0],
+    "catalyst_date": "2026-09-30",
+    "thesis_ref": "theses/wbd_psky_merger.md",
+    "sleeve": "merger_arb"
+  }
+]

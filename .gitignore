@@ -1,0 +1,26 @@
+# Secrets — never commit
+.env
+
+# SQLite database (local state, rebuilt by init_db)
+monitor.db
+monitor.db-journal
+monitor.db-wal
+monitor.db-shm
+
+# Dated JSON snapshots produced at runtime
+/data/*.json
+!/data/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# OS / editor cruft
+.DS_Store
+*.swp
+.idea/
+.vscode/
