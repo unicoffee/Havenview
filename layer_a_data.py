@@ -51,6 +51,7 @@ import json
 import math
 import os
 import sqlite3
+import sys
 from datetime import datetime, timezone
 
 import numpy as np
@@ -546,11 +547,13 @@ def write_dated_snapshot(data_dir, asof_date, payload):
 # Replay (--asof): reload a stored snapshot; no network, no DB writes
 # --------------------------------------------------------------------------
 def replay(asof_date, data_dir, db_path):
+    """Reload a stored snapshot. Diagnostics go to stderr so stdout stays
+    clean JSON for callers piping this into a dashboard/alerter."""
     path = os.path.join(data_dir, f"{asof_date}.json")
     if os.path.exists(path):
         with open(path) as fh:
             payload = json.load(fh)
-        print(f"[replay] loaded {path}")
+        print(f"[replay] loaded {path}", file=sys.stderr)
         return payload
 
     # Fall back to reconstructing from the snapshots table's raw blobs.
@@ -570,7 +573,7 @@ def replay(asof_date, data_dir, db_path):
     tickers = {}
     for ticker, raw in rows:
         tickers[ticker] = json.loads(raw) if raw else {"ticker": ticker}
-    print(f"[replay] reconstructed {len(tickers)} ticker(s) from DB for {asof_date}")
+    print(f"[replay] reconstructed {len(tickers)} ticker(s) from DB for {asof_date}", file=sys.stderr)
     return {"asof": asof_date, "source": "db", "tickers": tickers}
 
 

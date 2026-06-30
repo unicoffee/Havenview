@@ -34,6 +34,7 @@ restricted to read endpoints and outbound notifications.
 | `watches.json` | Catalyst / event-driven watches and their tripwires |
 | `init_db.py` | Creates the SQLite schema in `monitor.db` |
 | `layer_a_data.py` | Layer A collector: prices, local BS Greeks, IV-rank, stops |
+| `layer_b_portfolio.py` | Layer B analytics: allocation, book Greeks, DTE/stop/cap checks (pure compute) |
 | `monitor.db` | Local store: `snapshots`, `iv_history`, `macro_history`, `predmkt_history`, `alerts` |
 | `data/` | Dated JSON snapshots (e.g. `data/2026-06-30.json`) |
 | `theses/` | Per-position thesis documents referenced by `thesis_ref` |
@@ -82,16 +83,36 @@ Both environment variables are **optional**:
    least 20 observations have accumulated. `--asof` is purely read-only: it
    reloads a stored snapshot and never touches the network or mutates the DB.
    *(prediction-market + macro collectors — to be implemented)*
-3. **Evaluate tripwires** — compare the latest snapshot against the
+3. **Portfolio analytics (Layer B)** — reads the latest Layer A snapshot plus
+   `positions.json` and produces a compact dict for the dashboard/alerter.
+   Pure read/compute: no DB writes, no file writes, no network calls.
+   ```bash
+   python layer_b_portfolio.py                 # latest snapshot, JSON to stdout
+   python layer_b_portfolio.py --asof 2026-06-30
+   python layer_b_portfolio.py --sleeve-cap-pct 35 --name-cap-pct 10
+   ```
+   Computes: allocation per position and per **sleeve** (`size_pct_reserve`
+   from `positions.json`; e.g. TTWO + RKLB are both `expensive_momentum` and
+   are summed into one combined sleeve total, flagged against a configurable
+   cap — default 40% of reserve); aggregate book Greeks (net delta, theta/day,
+   vega); DTE flags per leg (`theta_bleed_into_event` when a leg is nearing
+   its own expiry but the catalyst it was bought for is still ahead and falls
+   *after* that expiry; `iv_crush_exposure` for a short-dated *single*-option
+   leg still open through its catalyst — spreads are excluded since their
+   vega nets out; `expired_leg` as a data-hygiene flag); `stop_underlying`
+   breaches (spot at/below the stop); and a per-name heat check against a
+   configurable per-position cap (default 15%). Diagnostics print to stderr
+   so stdout stays clean JSON for piping.
+4. **Evaluate tripwires** — compare the latest snapshot against the
    thresholds in `watches.json` and write any firings to `alerts`.
    *(evaluator — to be implemented)*
-4. **Deliver alerts** — push undelivered `alerts` rows to `PUSH_WEBHOOK_URL`
+5. **Deliver alerts** — push undelivered `alerts` rows to `PUSH_WEBHOOK_URL`
    if configured; otherwise they remain in the database and logs.
    *(notifier — to be implemented)*
-5. **Inspect** — run the dashboard:
+6. **Inspect** — run the dashboard:
    ```bash
    streamlit run app.py        # dashboard — to be implemented
    ```
 
-Steps 2–4 are intended to run on a schedule (e.g. cron / market hours).
+Steps 2–5 are intended to run on a schedule (e.g. cron / market hours).
 Step 1 only needs to run once per environment.
