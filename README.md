@@ -33,6 +33,7 @@ restricted to read endpoints and outbound notifications.
 | `positions.json` | The book: positions, legs, stops (on the **underlying**), targets |
 | `watches.json` | Catalyst / event-driven watches and their tripwires |
 | `init_db.py` | Creates the SQLite schema in `monitor.db` |
+| `layer_a_data.py` | Layer A collector: prices, local BS Greeks, IV-rank, stops |
 | `monitor.db` | Local store: `snapshots`, `iv_history`, `macro_history`, `predmkt_history`, `alerts` |
 | `data/` | Dated JSON snapshots (e.g. `data/2026-06-30.json`) |
 | `theses/` | Per-position thesis documents referenced by `thesis_ref` |
@@ -67,10 +68,20 @@ Both environment variables are **optional**:
    ```bash
    python init_db.py
    ```
-2. **Collect a snapshot** — poll market + prediction-market data, write a
-   dated JSON file to `data/`, and insert rows into `snapshots`,
-   `iv_history`, `macro_history`, and `predmkt_history`.
-   *(collector — to be implemented)*
+2. **Collect a snapshot (Layer A)** — pull underlying prices + history via
+   yfinance, fetch each option leg from the chain, compute Greeks **locally**
+   with Black-Scholes, derive an IV-rank per name, and evaluate each
+   position's distance from its `stop_underlying`. Writes a dated JSON file to
+   `data/` and upserts into `snapshots` and `iv_history`:
+   ```bash
+   python layer_a_data.py                 # live pull for every ticker
+   python layer_a_data.py --asof 2026-06-30   # replay a stored snapshot (no network)
+   python layer_a_data.py --sync-rh       # also READ Robinhood positions (optional, off by default)
+   ```
+   IV-rank is flagged as "thin" and seeded from trailing realized vol until at
+   least 20 observations have accumulated. `--asof` is purely read-only: it
+   reloads a stored snapshot and never touches the network or mutates the DB.
+   *(prediction-market + macro collectors — to be implemented)*
 3. **Evaluate tripwires** — compare the latest snapshot against the
    thresholds in `watches.json` and write any firings to `alerts`.
    *(evaluator — to be implemented)*
