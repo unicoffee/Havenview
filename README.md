@@ -36,6 +36,7 @@ restricted to read endpoints and outbound notifications.
 | `layer_a_data.py` | Layer A collector: prices, local BS Greeks, IV-rank, stops |
 | `layer_b_portfolio.py` | Layer B analytics: allocation, book Greeks, DTE/stop/cap checks (pure compute) |
 | `layer_c_macro.py` | Layer C: macro score, catalyst calendar, prediction markets, news-keyword scan |
+| `layer_d_dashboard.py` | Layer D: Streamlit dashboard + alerter (observe-and-notify only) |
 | `monitor.db` | Local store: `snapshots`, `iv_history`, `macro_history`, `predmkt_history`, `alerts` |
 | `data/` | Dated JSON snapshots (e.g. `data/2026-06-30.json`) |
 | `theses/` | Per-position thesis documents referenced by `thesis_ref` |
@@ -136,16 +137,34 @@ Both environment variables are **optional**:
      a web search in your Claude Code session), save them as a JSON list, and
      pass `--headlines` to get a bulleted digest — for review, never for
      automated action.
-5. **Evaluate tripwires** — compare the latest snapshot against the
-   thresholds in `watches.json` and write any firings to `alerts`.
-   *(evaluator — to be implemented)*
-6. **Deliver alerts** — push undelivered `alerts` rows to `PUSH_WEBHOOK_URL`
-   if configured; otherwise they remain in the database and logs.
-   *(notifier — to be implemented)*
-7. **Inspect** — run the dashboard:
+5. **Evaluate tripwires and deliver alerts (Layer D alerter)** — evaluates
+   the stop/sleeve/name-cap/DTE/IV-rank/prediction-market/headline conditions
+   above against the data Layers A–C just collected, writes every alert
+   (AMBER and RED) to `alerts`, and additionally POSTs RED alerts to
+   `PUSH_WEBHOOK_URL` if configured (else just logs them):
    ```bash
-   streamlit run app.py        # dashboard — to be implemented
+   python layer_d_dashboard.py --alert-check                       # headless, one-shot
+   python layer_d_dashboard.py --alert-check --headlines headlines.json
    ```
+   This is a discrete, explicitly-invoked step — never triggered automatically
+   by opening the dashboard (see below), so viewing the dashboard can never
+   itself spam duplicate alerts or webhook posts.
+6. **Inspect — the dashboard** — run separately, any time, as often as you
+   like; it only reads what Layers A–D already collected/recorded (no live
+   pulls, no alert writes on render):
+   ```bash
+   streamlit run layer_d_dashboard.py
+   ```
+   Panels: positions (structure, net delta/theta/vega, distance-to-stop,
+   P&L, % of reserve), sleeve allocation vs. caps, the macro-gate scorecard
+   (composite + all four components, styled as a 0–100 dial), and a
+   Catalyst Watch panel (days-to-catalyst, a green/amber/red status per
+   name, and each name's key metric — WBD spread %, RKLB price-vs-support +
+   IV-rank, TTWO IV-rank + the Kalshi on-time line). A live *preview* of
+   what the alerter would currently flag is always shown; an explicit
+   "Run alert check now" button is the only way the dashboard itself can
+   trigger `layer_d_dashboard.run_alerter()`.
 
-Steps 2–6 are intended to run on a schedule (e.g. cron / market hours).
-Step 1 only needs to run once per environment.
+Steps 2–5 are intended to run on a schedule (e.g. cron / market hours).
+Step 1 only needs to run once per environment. Step 6 is a separate,
+long-running process you start whenever you want to look at the book.
