@@ -47,9 +47,11 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import math
 import os
+import re
 import sqlite3
 import sys
 from datetime import datetime, timezone
@@ -159,6 +161,55 @@ def year_fraction(asof_date: str, expiry: str) -> float:
     a = datetime.strptime(asof_date, "%Y-%m-%d").date()
     e = datetime.strptime(expiry, "%Y-%m-%d").date()
     return max((e - a).days, 0) / 365.0
+
+
+# --------------------------------------------------------------------------
+# Shared date helpers (used by layer_b_portfolio.py and layer_c_macro.py too)
+# --------------------------------------------------------------------------
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def parse_date(s: str | None):
+    """Parse a "YYYY-MM-DD" string to a date, or None (tolerates loose
+    values like "2026-Q4" by returning None rather than raising)."""
+    if not s:
+        return None
+    try:
+        return datetime.strptime(s, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def days_between(asof_date, target_date) -> int | None:
+    """Calendar days from ``asof_date`` to ``target_date`` (each a "YYYY-MM-DD"
+    string or a date object). None if either side doesn't parse."""
+    a = parse_date(asof_date) if isinstance(asof_date, str) else asof_date
+    t = parse_date(target_date) if isinstance(target_date, str) else target_date
+    if a is None or t is None:
+        return None
+    return (t - a).days
+
+
+def find_latest_asof(data_dir: str, db_path: str) -> str | None:
+    """Most recent YYYY-MM-DD with a dated snapshot, checking ``data_dir``
+    first and falling back to the ``snapshots`` table."""
+    dates = []
+    for path in glob.glob(os.path.join(data_dir, "*.json")):
+        stem = os.path.splitext(os.path.basename(path))[0]
+        if DATE_RE.match(stem):
+            dates.append(stem)
+    if dates:
+        return max(dates)
+
+    if os.path.exists(db_path):
+        conn = sqlite3.connect(db_path)
+        try:
+            row = conn.execute("SELECT MAX(date(ts)) FROM snapshots").fetchone()
+        finally:
+            conn.close()
+        if row and row[0]:
+            return row[0]
+    return None
 
 
 def realized_vol(closes) -> float | None:

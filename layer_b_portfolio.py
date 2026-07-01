@@ -47,16 +47,13 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import glob
 import json
-import os
-import re
 from datetime import datetime, timezone
 
 import layer_a_data as la_data
+from layer_a_data import days_between, find_latest_asof, parse_date  # noqa: F401 (re-exported)
 
 POSITIONS_FILE = "positions.json"
-DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 # Defaults — all overridable via CLI / compute_portfolio() kwargs.
 DEFAULT_SLEEVE_CAP_PCT = 40.0
@@ -72,30 +69,6 @@ def utc_now_iso() -> str:
 # --------------------------------------------------------------------------
 # Snapshot discovery / loading (read-only)
 # --------------------------------------------------------------------------
-def find_latest_asof(data_dir: str, db_path: str) -> str | None:
-    """Most recent YYYY-MM-DD with a dated snapshot file in ``data_dir``."""
-    dates = []
-    for path in glob.glob(os.path.join(data_dir, "*.json")):
-        stem = os.path.splitext(os.path.basename(path))[0]
-        if DATE_RE.match(stem):
-            dates.append(stem)
-    if dates:
-        return max(dates)
-
-    # Fall back to the snapshots table if no dated JSON files exist yet.
-    if os.path.exists(db_path):
-        import sqlite3
-
-        conn = sqlite3.connect(db_path)
-        try:
-            row = conn.execute("SELECT MAX(date(ts)) FROM snapshots").fetchone()
-        finally:
-            conn.close()
-        if row and row[0]:
-            return row[0]
-    return None
-
-
 def load_snapshot(asof: str | None, data_dir: str, db_path: str) -> dict:
     """Load the snapshot for ``asof`` (or the latest available). Read-only."""
     resolved = asof or find_latest_asof(data_dir, db_path)
@@ -110,26 +83,6 @@ def load_snapshot(asof: str | None, data_dir: str, db_path: str) -> dict:
 def load_positions(path: str = POSITIONS_FILE) -> list:
     with open(path) as fh:
         return json.load(fh)
-
-
-# --------------------------------------------------------------------------
-# Date helpers
-# --------------------------------------------------------------------------
-def parse_date(s: str | None):
-    if not s:
-        return None
-    try:
-        return datetime.strptime(s, "%Y-%m-%d").date()
-    except ValueError:
-        return None  # tolerate loose values like "2026-Q4" — just skip DTE math
-
-
-def days_between(asof_date, target_date) -> int | None:
-    a = parse_date(asof_date) if isinstance(asof_date, str) else asof_date
-    t = parse_date(target_date) if isinstance(target_date, str) else target_date
-    if a is None or t is None:
-        return None
-    return (t - a).days
 
 
 # --------------------------------------------------------------------------

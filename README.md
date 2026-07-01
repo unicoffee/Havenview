@@ -35,6 +35,7 @@ restricted to read endpoints and outbound notifications.
 | `init_db.py` | Creates the SQLite schema in `monitor.db` |
 | `layer_a_data.py` | Layer A collector: prices, local BS Greeks, IV-rank, stops |
 | `layer_b_portfolio.py` | Layer B analytics: allocation, book Greeks, DTE/stop/cap checks (pure compute) |
+| `layer_c_macro.py` | Layer C: macro score, catalyst calendar, prediction markets, news-keyword scan |
 | `monitor.db` | Local store: `snapshots`, `iv_history`, `macro_history`, `predmkt_history`, `alerts` |
 | `data/` | Dated JSON snapshots (e.g. `data/2026-06-30.json`) |
 | `theses/` | Per-position thesis documents referenced by `thesis_ref` |
@@ -82,7 +83,6 @@ Both environment variables are **optional**:
    IV-rank is flagged as "thin" and seeded from trailing realized vol until at
    least 20 observations have accumulated. `--asof` is purely read-only: it
    reloads a stored snapshot and never touches the network or mutates the DB.
-   *(prediction-market + macro collectors — to be implemented)*
 3. **Portfolio analytics (Layer B)** — reads the latest Layer A snapshot plus
    `positions.json` and produces a compact dict for the dashboard/alerter.
    Pure read/compute: no DB writes, no file writes, no network calls.
@@ -103,16 +103,49 @@ Both environment variables are **optional**:
    breaches (spot at/below the stop); and a per-name heat check against a
    configurable per-position cap (default 15%). Diagnostics print to stderr
    so stdout stays clean JSON for piping.
-4. **Evaluate tripwires** — compare the latest snapshot against the
+4. **Macro gate, catalysts, prediction markets, news scan (Layer C)** — reads
+   free public data only (FRED, Wikipedia's S&P 500 list, yfinance, Kalshi's
+   public market-data API — never a brokerage). Writes to `macro_history` and
+   `predmkt_history`; prints a compact JSON dict to stdout (diagnostics on
+   stderr):
+   ```bash
+   python layer_c_macro.py                        # live pull, all parts
+   python layer_c_macro.py --asof 2026-06-30       # historical macro/predmkt as-of a date
+   python layer_c_macro.py --skip-breadth          # skip the heavy S&P 500 breadth pull
+   python layer_c_macro.py --headlines headlines.json   # include the news digest
+   ```
+   - **Macro score (0-100)** — "the deployment-pace dial." A deterministic
+     composite of VIX level+52wk percentile, VIX/VIX3M term structure
+     (contango/backwardation), S&P 500 breadth (% above 200DMA), and HY OAS
+     credit spread, each 0-100 and independently degradable (a flaky
+     component reweights the composite rather than failing the whole score).
+     This dials portfolio-level cash-deployment pace — **not** a single-name
+     veto or stop.
+   - **Catalyst calendar** — days-to-catalyst per `watches.json` entry,
+     tolerant of coarse dates like `"2026-Q4"` (resolved to quarter-end).
+   - **Prediction-market poll (best-effort)** — TTWO polls Kalshi's public
+     `KXGTA6` series (a real, live "will GTA6 release by `<date>`?" ladder)
+     for the market bracketing the catalyst date, and flags a same-day
+     on-time-probability drop >= the configured points threshold; if Kalshi
+     ever needs auth we don't have, it logs "check Kalshi manually" instead
+     of failing. WBD has no external venue — its merger-arb spread
+     `(deal_price - price) / price` *is* its prediction market, flagged on
+     widening/converging past `watches.json`'s thresholds.
+   - **News scan** — defines the per-name keyword sets and a pure matcher;
+     it does **not** crawl any live news API. Source headlines yourself (e.g.
+     a web search in your Claude Code session), save them as a JSON list, and
+     pass `--headlines` to get a bulleted digest — for review, never for
+     automated action.
+5. **Evaluate tripwires** — compare the latest snapshot against the
    thresholds in `watches.json` and write any firings to `alerts`.
    *(evaluator — to be implemented)*
-5. **Deliver alerts** — push undelivered `alerts` rows to `PUSH_WEBHOOK_URL`
+6. **Deliver alerts** — push undelivered `alerts` rows to `PUSH_WEBHOOK_URL`
    if configured; otherwise they remain in the database and logs.
    *(notifier — to be implemented)*
-6. **Inspect** — run the dashboard:
+7. **Inspect** — run the dashboard:
    ```bash
    streamlit run app.py        # dashboard — to be implemented
    ```
 
-Steps 2–5 are intended to run on a schedule (e.g. cron / market hours).
+Steps 2–6 are intended to run on a schedule (e.g. cron / market hours).
 Step 1 only needs to run once per environment.
