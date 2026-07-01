@@ -37,6 +37,7 @@ restricted to read endpoints and outbound notifications.
 | `layer_b_portfolio.py` | Layer B analytics: allocation, book Greeks, DTE/stop/cap checks (pure compute) |
 | `layer_c_macro.py` | Layer C: macro score, catalyst calendar, prediction markets, news-keyword scan |
 | `layer_d_dashboard.py` | Layer D: Streamlit dashboard + alerter (observe-and-notify only) |
+| `run_daily.py` | Orchestrator: runs Layers A → B → C → D-alerter, prints a summary |
 | `monitor.db` | Local store: `snapshots`, `iv_history`, `macro_history`, `predmkt_history`, `alerts` |
 | `data/` | Dated JSON snapshots (e.g. `data/2026-06-30.json`) |
 | `theses/` | Per-position thesis documents referenced by `thesis_ref` |
@@ -66,6 +67,11 @@ Both environment variables are **optional**:
 - `PUSH_WEBHOOK_URL` — outbound alert delivery (Slack/Discord/ntfy/…).
 
 ## Run order
+
+The quick path — run everything at once with `run_daily.py` (see below),
+then look at the dashboard. The steps below are what it runs under the
+hood, and remain independently useful for testing/debugging one layer at a
+time.
 
 1. **Initialize the database** (idempotent):
    ```bash
@@ -168,3 +174,37 @@ Both environment variables are **optional**:
 Steps 2–5 are intended to run on a schedule (e.g. cron / market hours).
 Step 1 only needs to run once per environment. Step 6 is a separate,
 long-running process you start whenever you want to look at the book.
+
+## Quick start with `run_daily.py`
+
+```bash
+pip install -r requirements.txt      # once
+python run_daily.py                  # runs steps 1-5 above, prints a summary
+streamlit run layer_d_dashboard.py   # separate process, reads what run_daily.py collected
+```
+
+`run_daily.py` runs Layers A → B → C → D-alerter in sequence (calling
+`init_db.init_db()` first, harmlessly, in case this is a fresh clone),
+writes the snapshot and every alert, and prints a one-screen summary: the
+macro score, sleeve allocation vs. cap, any RED/AMBER tripwires that fired
+this run, and days-to-catalyst per name. Like every layer, it never trades
+or writes to a brokerage — see the guarantee at the top of this file, which
+is also reaffirmed in `run_daily.py`'s own header.
+
+```bash
+python run_daily.py --asof 2026-06-30       # replay Layer A's stored snapshot;
+                                             # Layers B-D use that date too
+python run_daily.py --headlines headlines.json --skip-breadth
+```
+
+Schedule it with cron (Linux/macOS) or Task Scheduler (Windows) — see the
+docstring in `run_daily.py` for copy-pasteable examples of both. Running it
+more than once on the same calendar day is safe: each layer upserts that
+day's row rather than accumulating duplicates (alerts are the one
+exception — they're an append-only event log, so a condition that's still
+true tomorrow correctly logs again, it isn't deduplicated away).
+
+The dashboard is a separate, long-running process — start it whenever you
+want to look at the book. It never triggers a live pull or writes an alert
+merely by being open; it only reads whatever `run_daily.py` (or the
+individual layer scripts) already collected.

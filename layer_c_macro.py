@@ -656,6 +656,78 @@ def format_news_digest(matches: dict) -> str:
 # ==========================================================================
 # Orchestration / CLI
 # ==========================================================================
+def run_layer_c(
+    db_path: str = la_data.DEFAULT_DB,
+    data_dir: str = la_data.DEFAULT_DATA_DIR,
+    watches_path: str = WATCHES_FILE,
+    asof: str | None = None,
+    skip_breadth: bool = False,
+    headlines_path: str | None = None,
+    weights: dict | None = None,
+    snapshot: dict | None = None,
+) -> dict:
+    """Run all four parts and return the compact result dict. This is the
+    orchestration entry point other code (``run_daily.py``, tests) should
+    call in-process, instead of shelling out to ``main()``.
+
+    ``snapshot`` lets a caller that already has the current Layer A snapshot
+    in memory (e.g. ``run_daily.py``, right after Layer A ran) pass it
+    straight through for WBD's arb-spread calc, instead of this function
+    re-reading it from disk/DB via ``find_latest_asof``.
+    """
+    load_dotenv()
+    asof_date = asof or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    weights = weights or DEFAULT_WEIGHTS
+
+    watches = load_watches(watches_path)
+    conn = sqlite3.connect(db_path)
+
+    result = {"asof": asof_date, "generated_at": utc_now_iso()}
+    try:
+        # Part 1
+        macro = compute_macro_score(asof_date, weights=weights, skip_breadth=skip_breadth)
+        persist_macro_history(conn, asof_date, macro)
+        result["macro_score"] = macro
+
+        # Part 2
+        result["catalyst_calendar"] = compute_catalyst_calendar(watches, asof_date)
+
+        # Part 3
+        ttwo_watch = next((w for w in watches if w["ticker"] == "TTWO"), None)
+        wbd_watch = next((w for w in watches if w["ticker"] == "WBD"), None)
+        predmkt = {}
+        if ttwo_watch:
+            predmkt["TTWO"] = poll_kalshi_ttwo(conn, ttwo_watch, asof_date)
+        if wbd_watch:
+            if snapshot is None:
+                latest = find_latest_asof(data_dir, db_path)
+                snapshot = la_data.replay(latest, data_dir, db_path) if latest else {"tickers": {}}
+            wbd_price = (snapshot.get("tickers", {}).get("WBD") or {}).get("underlying")
+            predmkt["WBD"] = compute_wbd_arb_spread(conn, wbd_watch, wbd_price, asof_date)
+        result["prediction_markets"] = predmkt
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Part 4
+    if headlines_path:
+        with open(headlines_path) as fh:
+            headlines = json.load(fh)
+        matches = scan_headlines(headlines)
+        result["news_digest"] = {
+            "matches": matches,
+            "digest_text": format_news_digest(matches),
+        }
+    else:
+        result["news_digest"] = {
+            "note": "no --headlines supplied; source recent headlines in your Claude Code "
+                    "session (e.g. a web search) and pass them via --headlines to scan",
+            "keywords": NEWS_KEYWORDS,
+        }
+
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description="Havenview Layer C — macro gate, catalysts, prediction markets, news scan (read-only)")
     parser.add_argument("--db", default=la_data.DEFAULT_DB)
@@ -670,56 +742,12 @@ def main():
     parser.add_argument("--w-credit", type=float, default=DEFAULT_WEIGHTS["credit"])
     args = parser.parse_args()
 
-    load_dotenv()
-    asof_date = args.asof or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     weights = {"vix": args.w_vix, "term_structure": args.w_term, "breadth": args.w_breadth, "credit": args.w_credit}
-
-    watches = load_watches(args.watches)
-    conn = sqlite3.connect(args.db)
-
-    result = {"asof": asof_date, "generated_at": utc_now_iso()}
-    try:
-        # Part 1
-        macro = compute_macro_score(asof_date, weights=weights, skip_breadth=args.skip_breadth)
-        persist_macro_history(conn, asof_date, macro)
-        result["macro_score"] = macro
-
-        # Part 2
-        result["catalyst_calendar"] = compute_catalyst_calendar(watches, asof_date)
-
-        # Part 3
-        ttwo_watch = next((w for w in watches if w["ticker"] == "TTWO"), None)
-        wbd_watch = next((w for w in watches if w["ticker"] == "WBD"), None)
-        predmkt = {}
-        if ttwo_watch:
-            predmkt["TTWO"] = poll_kalshi_ttwo(conn, ttwo_watch, asof_date)
-        if wbd_watch:
-            snapshot = la_data.replay(
-                find_latest_asof(args.data_dir, args.db) or asof_date, args.data_dir, args.db
-            ) if (find_latest_asof(args.data_dir, args.db)) else {"tickers": {}}
-            wbd_price = (snapshot.get("tickers", {}).get("WBD") or {}).get("underlying")
-            predmkt["WBD"] = compute_wbd_arb_spread(conn, wbd_watch, wbd_price, asof_date)
-        result["prediction_markets"] = predmkt
-        conn.commit()
-    finally:
-        conn.close()
-
-    # Part 4
-    if args.headlines:
-        with open(args.headlines) as fh:
-            headlines = json.load(fh)
-        matches = scan_headlines(headlines)
-        result["news_digest"] = {
-            "matches": matches,
-            "digest_text": format_news_digest(matches),
-        }
-    else:
-        result["news_digest"] = {
-            "note": "no --headlines supplied; source recent headlines in your Claude Code "
-                    "session (e.g. a web search) and pass them via --headlines to scan",
-            "keywords": NEWS_KEYWORDS,
-        }
-
+    result = run_layer_c(
+        db_path=args.db, data_dir=args.data_dir, watches_path=args.watches,
+        asof=args.asof, skip_breadth=args.skip_breadth, headlines_path=args.headlines,
+        weights=weights,
+    )
     print(json.dumps(result, indent=2, default=str))
 
 
