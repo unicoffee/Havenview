@@ -1,0 +1,4 @@
+pipeline.db
+pipeline.db-journal
+pipeline.db-wal
+pipeline.db-shm
